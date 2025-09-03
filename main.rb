@@ -38,6 +38,10 @@ def delay(seconds)
   sleep(seconds)
 end
 
+def random_delay(min, max)
+  sleep(rand(min..max))
+end
+
 def display_banner
   puts BANNER.colorize(:magenta)
   puts '     LETS FUCK THIS TESTNET CREATED BY KAZUHA787      '.colorize(:magenta)
@@ -90,6 +94,7 @@ def load_accounts
 end
 
 ACCOUNTS = load_accounts
+START_OFFSET = rand(ACCOUNTS.length)
 
 # --- Account Pickers ---
 def pick_random_account
@@ -97,7 +102,7 @@ def pick_random_account
 end
 
 def pick_round_robin(cycle_count)
-  ACCOUNTS[(cycle_count - 1) % ACCOUNTS.length]
+  ACCOUNTS[(cycle_count - 1 + START_OFFSET) % ACCOUNTS.length]
 end
 
 # --- Core Functions ---
@@ -170,26 +175,28 @@ def ask_backend_ai(question_text, retry_count = 0)
   end
 end
 
-def save_questions(questions)
+def save_questions(questions, account)
+  filename = "questions_#{account[:user_id]}.txt"
   spinner_message('Saving questions')
   
   begin
     content = questions.map { |q| q['text'].strip }.join("\n") + "\n"
-    File.write('questions.txt', content)
-    spinner_message("Saved #{questions.length} questions to questions.txt", :success)
+    File.write(filename, content)
+    spinner_message("Saved #{questions.length} questions to #{filename}", :success)
   rescue => e
     spinner_message("Failed to save questions: #{e.message}", :error)
     raise e
   end
 end
 
-def save_responses(responses)
+def save_responses(responses, account)
+  filename = "response_#{account[:user_id]}.txt"
   spinner_message('Saving responses')
   
   begin
     content = responses.map { |r| clean_response(r || '') }.join("\n") + "\n"
-    File.write('response.txt', content)
-    spinner_message("Saved #{responses.length} responses to response.txt", :success)
+    File.write(filename, content)
+    spinner_message("Saved #{responses.length} responses to #{filename}", :success)
   rescue => e
     spinner_message("Failed to save responses: #{e.message}", :error)
     raise e
@@ -296,7 +303,7 @@ def run_cycle(cycle_count, total_cycles, mode)
     return false
   end
 
-  save_questions(questions)
+  save_questions(questions, account)
 
   # Step 2: Generate and save AI responses
   responses = []
@@ -308,10 +315,10 @@ def run_cycle(cycle_count, total_cycles, mode)
     
     ai_response = ask_backend_ai(question['text'])
     responses << (ai_response || '')
-    delay(6)
+    random_delay(5, 12)
   end
 
-  save_responses(responses)
+  save_responses(responses, account)
 
   # Step 3: Submit questions and responses
   retrieved_model_id = search_ai_model('gpt-3-5', account)
@@ -321,18 +328,18 @@ def run_cycle(cycle_count, total_cycles, mode)
 
     # Load questions and responses
     begin
-      questions_text = File.read('questions.txt').split("\n").reject(&:empty?)
+      questions_text = File.read("questions_#{account[:user_id]}.txt").split("\n").reject(&:empty?)
       puts "[+] Loaded #{questions_text.length} questions".colorize(:green)
     rescue => e
-      puts "[-] 'questions.txt' not found.".colorize(:red).bold
+      puts "[-] 'questions_#{account[:user_id]}.txt' not found.".colorize(:red).bold
       return false
     end
 
     begin
-      responses_text = File.read('response.txt').split("\n").reject(&:empty?)
+      responses_text = File.read("response_#{account[:user_id]}.txt").split("\n").reject(&:empty?)
       puts "[+] Loaded #{responses_text.length} responses".colorize(:green)
     rescue => e
-      puts "[-] 'response.txt' not found.".colorize(:red).bold
+      puts "[-] 'response_#{account[:user_id]}.txt' not found.".colorize(:red).bold
       return false
     end
 
