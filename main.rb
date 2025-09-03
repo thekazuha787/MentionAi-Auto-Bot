@@ -11,8 +11,6 @@ require 'io/console'
 Dotenv.load
 
 # --- Configuration ---
-AUTH_TOKEN = ENV['AUTH_TOKEN']
-USER_ID = ENV['USER_ID'].to_i
 BASE_URL = 'https://api.mention.network'
 BACKEND_API_URL = 'https://backend.buildpicoapps.com/aero/run/llm-api?pk=v1-Z0FBQUFBQm5IZkJDMlNyYUVUTjIyZVN3UWFNX3BFTU85SWpCM2NUMUk3T2dxejhLSzBhNWNMMXNzZlp3c09BSTR6YW1Sc1BmdGNTVk1GY0liT1RoWDZZX1lNZlZ0Z1dqd3c9PQ=='
 MAX_QUESTIONS = 15
@@ -23,12 +21,12 @@ WAIT_TIME_HOURS = 24
 
 # --- Banner ---
 BANNER = <<~BANNER
- ███╗   ███╗███████╗███╗   ██╗████████╗██╗ ██████╗ ███╗   ██╗
- ████╗ ████║██╔════╝████╗  ██║╚══██╔══╝██║██╔═══██╗████╗  ██║
- ██╔████╔██║█████╗  ██╔██╗ ██║   ██║   ██║██║   ██║██╔██╗ ██║
- ██║╚██╔╝██║██╔══╝  ██║╚██╗██║   ██║   ██║██║   ██║██║╚██╗██║
- ██║ ╚═╝ ██║███████╗██║ ╚████║   ██║   ██║╚██████╔╝██║ ╚████║
- ╚═╝     ╚═╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
+ ███╗  ███╗███████╗███╗  ██╗████████╗██╗ ██████╗ ███╗  ██╗
+ ████╗ ████║██╔════╝████╗ ██║╚══██╔══╝██║██╔═══██╗████╗ ██║
+ ██╔████╔██║█████╗  ██╔██╗ ██║  ██║   ██║██║  ██║██╔██╗ ██║
+ ██║╚██╔╝██║██╔══╝  ██║╚██╗██║  ██║   ██║██║  ██║██║╚██╗██║
+ ██║ ╚═╝ ██║███████╗██║ ╚████║  ██║   ██║╚██████╔╝██║ ╚████║
+ ╚═╝     ╚═╝╚══════╝╚═╝  ╚═══╝  ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
 BANNER
 
 # --- Helper Functions ---
@@ -42,7 +40,7 @@ end
 
 def display_banner
   puts BANNER.colorize(:magenta)
-  puts '      LETS FUCK THIS TESTNET CREATED BY KAZUHA787      '.colorize(:magenta)
+  puts '     LETS FUCK THIS TESTNET CREATED BY KAZUHA787      '.colorize(:magenta)
   puts '==========================================='.colorize(:magenta)
 end
 
@@ -77,8 +75,33 @@ def spinner_message(message, status = :info)
   end
 end
 
+# --- Accounts Loader ---
+def load_accounts
+  accounts = []
+  idx = 1
+  loop do
+    token = ENV["AUTH_TOKEN_#{idx}"]
+    user  = ENV["USER_ID_#{idx}"]
+    break unless token && user
+    accounts << { token: token, user_id: user.to_i }
+    idx += 1
+  end
+  accounts
+end
+
+ACCOUNTS = load_accounts
+
+# --- Account Pickers ---
+def pick_random_account
+  ACCOUNTS.sample
+end
+
+def pick_round_robin(cycle_count)
+  ACCOUNTS[(cycle_count - 1) % ACCOUNTS.length]
+end
+
 # --- Core Functions ---
-def fetch_questions
+def fetch_questions(account)
   spinner_message("Fetching up to #{MAX_QUESTIONS} questions")
   
   uri = URI("#{BASE_URL}/questions/random-list")
@@ -87,7 +110,7 @@ def fetch_questions
   
   request = Net::HTTP::Get.new(uri)
   request['accept'] = 'application/json'
-  request['authorization'] = "Bearer #{AUTH_TOKEN}"
+  request['authorization'] = "Bearer #{account[:token]}"
   request['user-agent'] = 'Mozilla/5.0'
   
   begin
@@ -173,7 +196,7 @@ def save_responses(responses)
   end
 end
 
-def search_ai_model(query)
+def search_ai_model(query, account)
   spinner_message("Searching for model: #{query}")
   
   uri = URI("#{BASE_URL}/api/ai-models/search")
@@ -183,7 +206,7 @@ def search_ai_model(query)
   http.use_ssl = true
   
   request = Net::HTTP::Get.new(uri)
-  request['Authorization'] = "Bearer #{AUTH_TOKEN}"
+  request['Authorization'] = "Bearer #{account[:token]}"
   
   begin
     response = http.request(request)
@@ -219,17 +242,17 @@ def search_ai_model(query)
   end
 end
 
-def log_interaction(user_id, model_id, request_text, response_text, idx)
+def log_interaction(account, model_id, request_text, response_text, idx)
   uri = URI("#{BASE_URL}/interactions")
   http = Net::HTTP.new(uri.host, uri.port)
   http.use_ssl = true
   
   request = Net::HTTP::Post.new(uri)
-  request['Authorization'] = "Bearer #{AUTH_TOKEN}"
+  request['Authorization'] = "Bearer #{account[:token]}"
   request['Content-Type'] = 'application/json'
   
   payload = {
-    userId: user_id,
+    userId: account[:user_id],
     modelId: model_id,
     requestText: request_text,
     responseText: clean_response(response_text || '')
@@ -257,13 +280,17 @@ def log_interaction(user_id, model_id, request_text, response_text, idx)
   end
 end
 
-def run_cycle(cycle_count, total_cycles)
+def run_cycle(cycle_count, total_cycles, mode)
+  # Pick an account for this cycle based on the mode
+  account = mode == :round_robin ? pick_round_robin(cycle_count) : pick_random_account
+  puts "\n[*] Using account USER_ID=#{account[:user_id]}".colorize(:yellow)
+  
   puts "\n-----------------------------------------------------".colorize(:blue)
   puts "Starting Cycle ##{cycle_count}/#{total_cycles} | #{Time.now.strftime('%Y-%m-%d %H:%M:%S')}".colorize(:blue)
   puts "-----------------------------------------------------".colorize(:blue)
 
   # Step 1: Fetch and save questions
-  questions = fetch_questions
+  questions = fetch_questions(account)
   if questions.empty?
     puts '[-] No questions fetched. Skipping cycle.'.colorize(:red).bold
     return false
@@ -287,7 +314,7 @@ def run_cycle(cycle_count, total_cycles)
   save_responses(responses)
 
   # Step 3: Submit questions and responses
-  retrieved_model_id = search_ai_model('gpt-3-5')
+  retrieved_model_id = search_ai_model('gpt-3-5', account)
   
   if retrieved_model_id
     puts "\n[*] Model ID: #{retrieved_model_id}".colorize(:blue).bold
@@ -319,7 +346,7 @@ def run_cycle(cycle_count, total_cycles)
       
       pairs.times do |i|
         if responses_text[i] && !responses_text[i].empty?
-          log_interaction(USER_ID, retrieved_model_id, questions_text[i], responses_text[i], i + 1)
+          log_interaction(account, retrieved_model_id, questions_text[i], responses_text[i], i + 1)
         else
           puts "[!] Skipped: No valid response for interaction #{i + 1}".colorize(:yellow)
         end
@@ -340,8 +367,8 @@ end
 begin
   display_banner
 
-  if !AUTH_TOKEN || !USER_ID
-    puts 'FATAL: AUTH_TOKEN or USER_ID not found in .env file. Bot is stopping.'.colorize(:red).bold
+  if ACCOUNTS.empty?
+    puts 'FATAL: No accounts found in .env file. Bot is stopping.'.colorize(:red).bold
     exit(1)
   end
 
@@ -357,6 +384,18 @@ begin
       puts '> Invalid input. Please enter a positive integer (e.g., 10).'.colorize(:red)
     end
   end
+  
+  # Get user input for mode
+  mode = nil
+  while mode.nil?
+    input = ask_question('Select a mode (random or round-robin): ')
+    if ['random', 'round-robin'].include?(input.downcase)
+      mode = input.downcase.to_sym
+      puts "> Mode set to #{mode}.".colorize(:green)
+    else
+      puts '> Invalid input. Please enter either "random" or "round-robin".'.colorize(:red)
+    end
+  end
 
   puts "> Wait time between full runs: #{WAIT_TIME_HOURS} hours.".colorize(:yellow)
   puts "> Connected to Mention API".colorize(:green)
@@ -364,7 +403,7 @@ begin
   loop do
     (1..total_cycles).each do |cycle_count|
       begin
-        success = run_cycle(cycle_count, total_cycles)
+        success = run_cycle(cycle_count, total_cycles, mode)
         
         if cycle_count < total_cycles && success
           puts "\n[*] Waiting for #{DELAY_BETWEEN_CYCLES} seconds before the next cycle...".colorize(:cyan)
